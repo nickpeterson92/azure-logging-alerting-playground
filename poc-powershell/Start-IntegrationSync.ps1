@@ -267,7 +267,7 @@ function Invoke-SalesforceFieldMissing {
     $lastSuccessTime = (Get-Date).AddHours(-2).ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
 
     Write-SyncEventLog `
-        -Message "FIELD_MAPPING_BROKEN: Source field dbo.Accounts.Segment maps to Account.Custom_Segment__c which no longer exists. Last successful sync used this mapping at $lastSuccessTime ($([math]::Round((Get-Date - (Get-Date).AddHours(-2)).TotalMinutes)) minutes ago). Possible cause: field deleted in Salesforce org, sandbox refresh overwrote production metadata, or field-level security revoked for profile 'Integration_User'. Mapping config: dbo.IntegrationFieldMap (MapId=8, SourceColumn='Segment', TargetObject='Account', TargetField='Custom_Segment__c'). Contact Salesforce admin to verify field exists and is accessible." `
+        -Message "FIELD_MAPPING_BROKEN: Source field dbo.Accounts.Segment maps to Account.Custom_Segment__c which no longer exists. Last successful sync used this mapping at $lastSuccessTime ($([math]::Round(((Get-Date) - (Get-Date).AddHours(-2)).TotalMinutes)) minutes ago). Possible cause: field deleted in Salesforce org, sandbox refresh overwrote production metadata, or field-level security revoked for profile 'Integration_User'. Mapping config: dbo.IntegrationFieldMap (MapId=8, SourceColumn='Segment', TargetObject='Account', TargetField='Custom_Segment__c'). Contact Salesforce admin to verify field exists and is accessible." `
         -EntryType 'Warning' `
         -EventId 2003
 
