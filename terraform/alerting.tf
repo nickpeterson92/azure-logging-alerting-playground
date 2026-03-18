@@ -15,14 +15,14 @@ resource "azurerm_monitor_action_group" "email" {
 }
 
 # =============================================================================
-# Log Search Alert - Error Level Events from SQLSync Sources
+# SQLSync-PowerShell Alerts
 # =============================================================================
 
-resource "azurerm_monitor_scheduled_query_rules_alert_v2" "error_events" {
-  name                = "alert-sqlsync-error-events"
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ps_error_events" {
+  name                = "alert-sqlsync-powershell-errors"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
-  description         = "Fires when Error-level Windows Event Log entries from SQLSync-PowerShell or SQLSync-NodeApp are detected."
+  description         = "Error events from SQLSync-PowerShell (SQL Server -> Salesforce Account sync)"
   tags                = var.tags
 
   evaluation_frequency = "PT5M"
@@ -35,7 +35,43 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "error_events" {
     query = <<-KQL
       Event
       | where EventLevelName == "Error"
-      | where Source in ("SQLSync-PowerShell", "SQLSync-NodeApp")
+      | where Source == "SQLSync-PowerShell"
+      | project TimeGenerated, Source, EventID, RenderedDescription, Computer
+    KQL
+
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.email.id]
+  }
+}
+
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ps_warning_events" {
+  name                = "alert-sqlsync-powershell-warnings"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  description         = "Warning events from SQLSync-PowerShell (rate limits, permission degradation)"
+  tags                = var.tags
+
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT5M"
+  scopes               = [azurerm_log_analytics_workspace.main.id]
+  severity             = 2
+  enabled              = true
+
+  criteria {
+    query = <<-KQL
+      Event
+      | where EventLevelName == "Warning"
+      | where Source == "SQLSync-PowerShell"
       | project TimeGenerated, Source, EventID, RenderedDescription, Computer
     KQL
 
@@ -55,14 +91,50 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "error_events" {
 }
 
 # =============================================================================
-# Log Search Alert - Warning Level Events from SQLSync Sources
+# SQLSync-NodeApp Alerts
 # =============================================================================
 
-resource "azurerm_monitor_scheduled_query_rules_alert_v2" "warning_events" {
-  name                = "alert-sqlsync-warning-events"
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "node_error_events" {
+  name                = "alert-sqlsync-nodeapp-errors"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
-  description         = "Fires when Warning-level Windows Event Log entries from SQLSync-PowerShell or SQLSync-NodeApp are detected."
+  description         = "Error events from SQLSync-NodeApp (SQL Server -> Salesforce Contact sync)"
+  tags                = var.tags
+
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT5M"
+  scopes               = [azurerm_log_analytics_workspace.main.id]
+  severity             = 1
+  enabled              = true
+
+  criteria {
+    query = <<-KQL
+      Event
+      | where EventLevelName == "Error"
+      | where Source == "SQLSync-NodeApp"
+      | project TimeGenerated, Source, EventID, RenderedDescription, Computer
+    KQL
+
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.email.id]
+  }
+}
+
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "node_warning_events" {
+  name                = "alert-sqlsync-nodeapp-warnings"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  description         = "Warning events from SQLSync-NodeApp (validation failures, partial success)"
   tags                = var.tags
 
   evaluation_frequency = "PT5M"
@@ -75,7 +147,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "warning_events" {
     query = <<-KQL
       Event
       | where EventLevelName == "Warning"
-      | where Source in ("SQLSync-PowerShell", "SQLSync-NodeApp")
+      | where Source == "SQLSync-NodeApp"
       | project TimeGenerated, Source, EventID, RenderedDescription, Computer
     KQL
 
