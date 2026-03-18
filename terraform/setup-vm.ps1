@@ -24,8 +24,12 @@ Write-Host "========================================" -ForegroundColor Cyan
 # 1. Set PowerShell Execution Policy
 # -----------------------------------------------------------------------------
 Write-Host "`n[1/9] Setting PowerShell execution policy to RemoteSigned..." -ForegroundColor Yellow
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
-Write-Host "  Execution policy set to RemoteSigned." -ForegroundColor Green
+try {
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force -ErrorAction SilentlyContinue
+    Write-Host "  Execution policy set to RemoteSigned." -ForegroundColor Green
+} catch {
+    Write-Host "  Execution policy not changed (GPO override in effect). Current policy: $(Get-ExecutionPolicy). Continuing." -ForegroundColor Yellow
+}
 
 # -----------------------------------------------------------------------------
 # 2. Install Chocolatey
