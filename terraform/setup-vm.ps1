@@ -23,14 +23,14 @@ Write-Host "========================================" -ForegroundColor Cyan
 # -----------------------------------------------------------------------------
 # 1. Set PowerShell Execution Policy
 # -----------------------------------------------------------------------------
-Write-Host "`n[1/7] Setting PowerShell execution policy to RemoteSigned..." -ForegroundColor Yellow
+Write-Host "`n[1/9] Setting PowerShell execution policy to RemoteSigned..." -ForegroundColor Yellow
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
 Write-Host "  Execution policy set to RemoteSigned." -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
 # 2. Install Chocolatey
 # -----------------------------------------------------------------------------
-Write-Host "`n[2/7] Installing Chocolatey package manager..." -ForegroundColor Yellow
+Write-Host "`n[2/9] Installing Chocolatey package manager..." -ForegroundColor Yellow
 
 if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
@@ -46,7 +46,7 @@ if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
 # -----------------------------------------------------------------------------
 # 3. Install Git and Node.js LTS via Chocolatey
 # -----------------------------------------------------------------------------
-Write-Host "`n[3/7] Installing Git..." -ForegroundColor Yellow
+Write-Host "`n[3/9] Installing Git..." -ForegroundColor Yellow
 
 if (!(Get-Command git -ErrorAction SilentlyContinue)) {
     choco install git -y --no-progress
@@ -56,7 +56,7 @@ if (!(Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "  Git is already installed: $(git --version)" -ForegroundColor Green
 }
 
-Write-Host "`n[4/7] Installing Node.js LTS..." -ForegroundColor Yellow
+Write-Host "`n[4/9] Installing Node.js LTS..." -ForegroundColor Yellow
 
 if (!(Get-Command node -ErrorAction SilentlyContinue)) {
     choco install nodejs-lts -y --no-progress
@@ -70,7 +70,7 @@ if (!(Get-Command node -ErrorAction SilentlyContinue)) {
 # -----------------------------------------------------------------------------
 # 4. Create C:\POC directory
 # -----------------------------------------------------------------------------
-Write-Host "`n[5/7] Creating C:\POC directory..." -ForegroundColor Yellow
+Write-Host "`n[5/9] Creating C:\POC directory..." -ForegroundColor Yellow
 
 if (!(Test-Path "C:\POC")) {
     New-Item -ItemType Directory -Path "C:\POC" -Force | Out-Null
@@ -80,17 +80,41 @@ if (!(Test-Path "C:\POC")) {
 }
 
 # -----------------------------------------------------------------------------
-# 5. Install node-windows globally via npm
+# 5. Clone repo and install Node dependencies
 # -----------------------------------------------------------------------------
-Write-Host "`n[6/7] Installing node-windows npm package globally..." -ForegroundColor Yellow
+Write-Host "`n[6/9] Cloning repo to C:\POC..." -ForegroundColor Yellow
+
+$repoDir = "C:\POC\azure-logging-alerting-playground"
+if (!(Test-Path "$repoDir\.git")) {
+    git clone https://github.com/nickpeterson92/azure-logging-alerting-playground.git $repoDir
+    Write-Host "  Repo cloned to $repoDir" -ForegroundColor Green
+} else {
+    git -C $repoDir pull
+    Write-Host "  Repo already exists, pulled latest." -ForegroundColor Green
+}
+
+# -----------------------------------------------------------------------------
+# 6. Install npm dependencies for poc-node
+# -----------------------------------------------------------------------------
+Write-Host "`n[7/9] Installing npm dependencies for poc-node..." -ForegroundColor Yellow
+
+Push-Location "$repoDir\poc-node"
+npm install
+Pop-Location
+Write-Host "  npm dependencies installed." -ForegroundColor Green
+
+# -----------------------------------------------------------------------------
+# 7. Install node-windows globally via npm
+# -----------------------------------------------------------------------------
+Write-Host "`n[8/9] Installing node-windows npm package globally..." -ForegroundColor Yellow
 
 npm install -g node-windows
 Write-Host "  node-windows installed globally." -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
-# 6. Register Windows Event Log Sources
+# 8. Register Windows Event Log Sources
 # -----------------------------------------------------------------------------
-Write-Host "`n[7/7] Registering Windows Event Log sources..." -ForegroundColor Yellow
+Write-Host "`n[9/9] Registering Windows Event Log sources..." -ForegroundColor Yellow
 
 $sources = @("SQLSync-PowerShell", "SQLSync-NodeApp")
 
@@ -116,6 +140,8 @@ Write-Host "  - Chocolatey: installed" -ForegroundColor White
 Write-Host "  - Git: $(git --version)" -ForegroundColor White
 Write-Host "  - Node.js: $(node --version)" -ForegroundColor White
 Write-Host "  - C:\POC: created" -ForegroundColor White
+Write-Host "  - Repo: C:\POC\azure-logging-alerting-playground" -ForegroundColor White
+Write-Host "  - poc-node: npm dependencies installed" -ForegroundColor White
 Write-Host "  - node-windows: installed globally" -ForegroundColor White
 Write-Host "  - Event sources: $($sources -join ', ')" -ForegroundColor White
 Write-Host ""

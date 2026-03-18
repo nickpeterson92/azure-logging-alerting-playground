@@ -51,8 +51,12 @@ resource "azurerm_virtual_machine_extension" "setup" {
   type_handler_version = "1.10"
   tags                 = var.tags
 
+  settings = jsonencode({
+    fileUris = ["https://raw.githubusercontent.com/nickpeterson92/azure-logging-alerting-playground/main/terraform/setup-vm.ps1"]
+  })
+
   protected_settings = jsonencode({
-    commandToExecute = "powershell -ExecutionPolicy Bypass -EncodedCommand ${textencodebase64(file("${path.module}/setup-vm.ps1"), "UTF-16LE")}"
+    commandToExecute = "powershell -ExecutionPolicy Bypass -File setup-vm.ps1"
   })
 
   depends_on = [
