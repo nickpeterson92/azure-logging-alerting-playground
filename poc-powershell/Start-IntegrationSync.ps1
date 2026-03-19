@@ -293,7 +293,7 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     $lastSyncTime = (Get-Date).AddMinutes(-(Get-Random -Minimum 5 -Maximum 60)).ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
 
     Write-SyncEventLog `
-        -Message "Sync cycle $cycle: Querying $SourceServer.$SourceDatabase dbo.Accounts for changes since $lastSyncTime..." `
+        -Message "Sync cycle ${cycle}: Querying $SourceServer.$SourceDatabase dbo.Accounts for changes since $lastSyncTime..." `
         -EntryType 'Information' `
         -EventId 1000
 
@@ -307,7 +307,8 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     if ($null -ne $sourceFailure) {
         $cat = $sourceFailure.Category
         $script:Stats.Failures++
-        $script:Stats.FailuresByType[$cat] = ($script:Stats.FailuresByType[$cat] ?? 0) + 1
+        if (-not $script:Stats.FailuresByType.ContainsKey($cat)) { $script:Stats.FailuresByType[$cat] = 0 }
+        $script:Stats.FailuresByType[$cat] += 1
 
         Write-Host "  => $cat" -ForegroundColor Red
 
@@ -324,7 +325,7 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     $script:Stats.TotalRecordsFetched += $recordCount
 
     Write-SyncEventLog `
-        -Message "Sync cycle $cycle: Fetched $recordCount Account records from $SourceServer (${queryDurationMs}ms). Schema version: v43." `
+        -Message "Sync cycle ${cycle}: Fetched $recordCount Account records from $SourceServer (${queryDurationMs}ms). Schema version: v43." `
         -EntryType 'Information' `
         -EventId 1000
 
@@ -332,7 +333,7 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     # Step 2: Write to target database
     # -----------------------------------------------------------------------
     Write-SyncEventLog `
-        -Message "Sync cycle $cycle: Writing $recordCount records to $TargetServer.$TargetDatabase dbo.Accounts via MERGE statement..." `
+        -Message "Sync cycle ${cycle}: Writing $recordCount records to $TargetServer.$TargetDatabase dbo.Accounts via MERGE statement..." `
         -EntryType 'Information' `
         -EventId 1000
 
@@ -346,7 +347,8 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     if ($null -ne $targetFailure) {
         $cat = $targetFailure.Category
         $script:Stats.Failures++
-        $script:Stats.FailuresByType[$cat] = ($script:Stats.FailuresByType[$cat] ?? 0) + 1
+        if (-not $script:Stats.FailuresByType.ContainsKey($cat)) { $script:Stats.FailuresByType[$cat] = 0 }
+        $script:Stats.FailuresByType[$cat] += 1
 
         Write-Host "  => $cat" -ForegroundColor Red
 
@@ -364,7 +366,7 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     $script:Stats.TotalRecordsWritten += $recordCount
 
     Write-SyncEventLog `
-        -Message "Sync cycle $cycle: Complete. $inserted inserted, $updated updated, 0 errors on $TargetServer.$TargetDatabase (${writeDurationMs}ms)." `
+        -Message "Sync cycle ${cycle}: Complete. $inserted inserted, $updated updated, 0 errors on $TargetServer.$TargetDatabase (${writeDurationMs}ms)." `
         -EntryType 'Information' `
         -EventId 1001
 
@@ -388,8 +390,10 @@ Write-Host "================================================================" -F
 Write-Host ""
 Write-Host "  Total Cycles Executed:  $($script:Stats.TotalCycles)"          -ForegroundColor White
 Write-Host "  Successful Syncs:       $($script:Stats.Successes)"            -ForegroundColor Green
-Write-Host "  Failed Syncs:           $($script:Stats.Failures)"             -ForegroundColor $(if ($script:Stats.Failures -gt 0) { 'Red' } else { 'Green' })
-Write-Host "  Total Retries:          $($script:Stats.TotalRetries)"         -ForegroundColor $(if ($script:Stats.TotalRetries -gt 0) { 'Yellow' } else { 'Gray' })
+$failColor = if ($script:Stats.Failures -gt 0) { 'Red' } else { 'Green' }
+Write-Host "  Failed Syncs:           $($script:Stats.Failures)"             -ForegroundColor $failColor
+$retryColor = if ($script:Stats.TotalRetries -gt 0) { 'Yellow' } else { 'Gray' }
+Write-Host "  Total Retries:          $($script:Stats.TotalRetries)"         -ForegroundColor $retryColor
 Write-Host "  Records Fetched:        $($script:Stats.TotalRecordsFetched)"  -ForegroundColor White
 Write-Host "  Records Written:        $($script:Stats.TotalRecordsWritten)"  -ForegroundColor White
 Write-Host ""
@@ -399,16 +403,19 @@ if ($script:Stats.FailuresByType.Count -gt 0) {
     foreach ($key in $script:Stats.FailuresByType.Keys | Sort-Object) {
         $count = $script:Stats.FailuresByType[$key]
         $isRetryExhausted = $key -match '_RETRY_EXHAUSTED$'
-        $color = if ($isRetryExhausted) { 'Yellow' } else { 'Red' }
+        if ($isRetryExhausted) { $color = 'Yellow' } else { $color = 'Red' }
         Write-Host "    ${key}: $count" -ForegroundColor $color
     }
     Write-Host ""
 }
 
-$successRate = if ($script:Stats.TotalCycles -gt 0) {
-    [math]::Round(($script:Stats.Successes / $script:Stats.TotalCycles) * 100, 1)
-} else { 0 }
-Write-Host "  Success Rate:           ${successRate}%" -ForegroundColor $(if ($successRate -eq 100) { 'Green' } else { 'Yellow' })
+if ($script:Stats.TotalCycles -gt 0) {
+    $successRate = [math]::Round(($script:Stats.Successes / $script:Stats.TotalCycles) * 100, 1)
+} else {
+    $successRate = 0
+}
+if ($successRate -eq 100) { $rateColor = 'Green' } else { $rateColor = 'Yellow' }
+Write-Host "  Success Rate:           ${successRate}%" -ForegroundColor $rateColor
 Write-Host ""
 Write-Host "  Event Log Source: $SourceName" -ForegroundColor Gray
 Write-Host "  View logs: Get-EventLog -LogName Application -Source '$SourceName' -Newest 50" -ForegroundColor Gray
