@@ -9,13 +9,13 @@ const sfClient = require("./sf-client");
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 500;
 
-// Event ID constants
+// Event ID constants (eventcreate limits IDs to 1-1000)
 const EVENT_ID = {
-	SYNC_START: 1000,
-	SYNC_SUCCESS: 1001,
-	SQL_ERROR: 2001,
-	SF_ERROR: 2002,
-	RETRYABLE_WARNING: 3001,
+	SYNC_START: 100,
+	SYNC_SUCCESS: 101,
+	SQL_ERROR: 201,
+	SF_ERROR: 202,
+	RETRYABLE_WARNING: 301,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

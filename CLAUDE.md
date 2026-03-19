@@ -9,7 +9,7 @@ POC for Azure Monitor, Log Analytics, and Application Insights alerting. Two sim
 - **PowerShell Simulator**: DB-to-DB sync (`dbo.Accounts` on `sqlprod-east-01` → `dbo.Accounts` on `sqlprod-west-01`). Mock SQL errors with real error numbers on both source query and target write sides.
 - **Node.js Simulator**: SQL-to-Salesforce sync (`dbo.Contacts` → SF `Contact`). Mock SQL client + real HTTP calls to a mock Salesforce API returning real status codes.
 
-Both simulators retry transient errors (deadlock 1205, timeout -2, snapshot isolation 3960, HTTP 429/503) up to 3 times, then escalate from warning to error. Event IDs: 1000=start, 1001=success, 2001=source error, 2002=target error, 3001=retryable warning. AMA/DCR collects events into Log Analytics, where KQL alert rules trigger email notifications (errors: threshold >0, warnings: threshold >5).
+Both simulators retry transient errors (deadlock 1205, timeout -2, snapshot isolation 3960, HTTP 429/503) up to 3 times, then escalate from warning to error. Event IDs (eventcreate limits to 1-1000): 100=start, 101=success, 201=source error, 202=target error, 301=retryable warning. AMA/DCR collects events into Log Analytics, where KQL alert rules trigger email notifications (errors: threshold >0, warnings: threshold >5).
 
 ## Task Tracking
 

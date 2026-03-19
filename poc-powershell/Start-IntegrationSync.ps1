@@ -9,12 +9,12 @@
     numbers. Transient failures (deadlock 1205, timeout -2, snapshot isolation 3960)
     are retried up to MaxRetries times before escalating from warning to error.
 
-    Event IDs:
-      1000 = Sync cycle started / info
-      1001 = Sync cycle completed successfully
-      2001 = Source SQL error
-      2002 = Target SQL error
-      3001 = Retryable warning (deadlock, timeout, snapshot isolation)
+    Event IDs (eventcreate limits IDs to 1-1000):
+      100 = Sync cycle started / info
+      101 = Sync cycle completed successfully
+      201 = Source SQL error
+      202 = Target SQL error
+      301 = Retryable warning (deadlock, timeout, snapshot isolation)
 
 .PARAMETER RunCount
     Number of sync cycles to execute. Default: 20
@@ -249,7 +249,7 @@ function Invoke-StepWithRetry {
         Write-SyncEventLog `
             -Message $retryDetail `
             -EntryType 'Warning' `
-            -EventId 3001
+            -EventId 301
 
         $script:Stats.TotalRetries++
         Start-Sleep -Milliseconds ($RetryBaseMs * $attempt)
@@ -295,13 +295,13 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     Write-SyncEventLog `
         -Message "Sync cycle ${cycle}: Querying $SourceServer.$SourceDatabase dbo.Accounts for changes since $lastSyncTime..." `
         -EntryType 'Information' `
-        -EventId 1000
+        -EventId 100
 
     $sourceFailure = Invoke-StepWithRetry `
         -StepName 'SourceQuery' `
         -ServerName $SourceServer `
         -ErrorCatalog $script:SourceErrors `
-        -ErrorEventId 2001 `
+        -ErrorEventId 201 `
         -StepFailureRate $FailureRate
 
     if ($null -ne $sourceFailure) {
@@ -327,7 +327,7 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     Write-SyncEventLog `
         -Message "Sync cycle ${cycle}: Fetched $recordCount Account records from $SourceServer (${queryDurationMs}ms). Schema version: v43." `
         -EntryType 'Information' `
-        -EventId 1000
+        -EventId 100
 
     # -----------------------------------------------------------------------
     # Step 2: Write to target database
@@ -335,13 +335,13 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     Write-SyncEventLog `
         -Message "Sync cycle ${cycle}: Writing $recordCount records to $TargetServer.$TargetDatabase dbo.Accounts via MERGE statement..." `
         -EntryType 'Information' `
-        -EventId 1000
+        -EventId 100
 
     $targetFailure = Invoke-StepWithRetry `
         -StepName 'TargetWrite' `
         -ServerName $TargetServer `
         -ErrorCatalog $script:TargetErrors `
-        -ErrorEventId 2002 `
+        -ErrorEventId 202 `
         -StepFailureRate $FailureRate
 
     if ($null -ne $targetFailure) {
@@ -368,7 +368,7 @@ for ($cycle = 1; $cycle -le $RunCount; $cycle++) {
     Write-SyncEventLog `
         -Message "Sync cycle ${cycle}: Complete. $inserted inserted, $updated updated, 0 errors on $TargetServer.$TargetDatabase (${writeDurationMs}ms)." `
         -EntryType 'Information' `
-        -EventId 1001
+        -EventId 101
 
     $script:Stats.Successes++
 
