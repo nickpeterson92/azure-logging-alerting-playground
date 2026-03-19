@@ -1,256 +1,252 @@
+// ---------------------------------------------------------------------------
+// Integration Simulator — uses real HTTP calls + mock SQL client
+// Retries transient failures up to MAX_RETRIES, then escalates to error.
+// ---------------------------------------------------------------------------
+
+const sqlClient = require("./sql-client");
+const sfClient = require("./sf-client");
+
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 500;
+
 // Event ID constants
 const EVENT_ID = {
-  SYNC_START: 1000,
-  SYNC_SUCCESS: 1001,
-  COLUMN_DROPPED: 2001,
-  TABLE_RENAMED: 2002,
-  SF_FIELD_MISSING: 2003,
-  SF_PERMISSION_ERROR: 2004,
-  VALIDATION_WARNING: 3001
+	SYNC_START: 1000,
+	SYNC_SUCCESS: 1001,
+	SQL_ERROR: 2001,
+	SF_ERROR: 2002,
+	RETRYABLE_WARNING: 3001,
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
- * Generate a random integer between min and max (inclusive).
+ * Attempt a SQL query with retries for transient errors (deadlock, timeout).
+ * Each retryable failure emits a warning event. If retries are exhausted,
+ * the final attempt emits an error.
  */
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+async function queryWithRetry(
+	_cycleNumber,
+	sinceTimestamp,
+	failureRate,
+	events,
+) {
+	for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+		try {
+			return await sqlClient.queryContacts(sinceTimestamp, failureRate);
+		} catch (err) {
+			if (!(err instanceof sqlClient.SqlError)) {
+				throw err;
+			}
+
+			const classification = sqlClient.classifyError(err);
+			const detail =
+				`SQL Error #${err.number} on ${err.serverName}: ${err.message} ` +
+				`[state=${err.state}, class=${err.class}] -> ${classification.category}`;
+
+			if (!classification.retryable || attempt > MAX_RETRIES) {
+				const level = attempt > MAX_RETRIES ? "error" : classification.level;
+				const suffix =
+					attempt > MAX_RETRIES
+						? ` (exhausted ${MAX_RETRIES} retries — escalating to error)`
+						: " (not retryable)";
+				events.push({
+					level,
+					eventId: EVENT_ID.SQL_ERROR,
+					message: detail + suffix,
+				});
+				throw {
+					classified: true,
+					classification,
+					isRetryExhausted: attempt > MAX_RETRIES,
+				};
+			}
+
+			events.push({
+				level: "warning",
+				eventId: EVENT_ID.RETRYABLE_WARNING,
+				message: `${detail} (attempt ${attempt}/${MAX_RETRIES}, retrying...)`,
+			});
+
+			await sleep(RETRY_BASE_MS * attempt);
+		}
+	}
 }
 
 /**
- * Simulate a delay to mimic real processing time.
+ * Attempt a Salesforce upsert with retries for transient errors (429, 503).
+ * Each retryable failure emits a warning event. If retries are exhausted,
+ * the final attempt emits an error.
  */
-function delay(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+async function upsertWithRetry(_cycleNumber, records, sfBaseUrl, events) {
+	for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+		try {
+			return await sfClient.upsertRecords(
+				"Contact",
+				"External_Id__c",
+				records,
+				sfBaseUrl,
+			);
+		} catch (err) {
+			if (!(err instanceof sfClient.SalesforceApiError)) {
+				throw err;
+			}
+
+			const classification = sfClient.classifyError(err);
+			const detail =
+				`Salesforce API ${err.statusCode}: [${err.errorCode}] ${err.message}` +
+				(err.fields.length ? ` (fields: ${err.fields.join(", ")})` : "") +
+				(err.retryAfter ? ` (retry-after: ${err.retryAfter}s)` : "") +
+				` -> ${classification.category}`;
+
+			if (!classification.retryable || attempt > MAX_RETRIES) {
+				const level = attempt > MAX_RETRIES ? "error" : classification.level;
+				const suffix =
+					attempt > MAX_RETRIES
+						? ` (exhausted ${MAX_RETRIES} retries — escalating to error)`
+						: " (not retryable)";
+				events.push({
+					level,
+					eventId: EVENT_ID.SF_ERROR,
+					message: detail + suffix,
+				});
+				throw {
+					classified: true,
+					classification,
+					isRetryExhausted: attempt > MAX_RETRIES,
+				};
+			}
+
+			events.push({
+				level: "warning",
+				eventId: EVENT_ID.RETRYABLE_WARNING,
+				message: `${detail} (attempt ${attempt}/${MAX_RETRIES}, retrying...)`,
+			});
+
+			const waitMs = err.retryAfter
+				? Math.min(err.retryAfter * 1000, 5000)
+				: RETRY_BASE_MS * attempt;
+			await sleep(waitMs);
+		}
+	}
 }
 
 /**
- * Run a single sync cycle simulation.
- *
- * @param {number} cycleNumber - The cycle number (1-based).
- * @param {number} [failureRate=0.3] - Probability of a failure occurring (0.0 to 1.0).
- * @returns {Promise<Object>} Result object with events array and summary data.
+ * Run a single sync cycle: query SQL -> upsert to Salesforce.
+ * Retryable errors are retried up to MAX_RETRIES times.
+ * If retries are exhausted, the warning escalates to an error.
  */
-async function runSyncCycle(cycleNumber, failureRate) {
-  if (typeof failureRate !== 'number') {
-    failureRate = 0.3;
-  }
+async function runSyncCycle(cycleNumber, options = {}) {
+	const { sqlFailureRate = 0.15, sfBaseUrl = "http://localhost:3001" } =
+		options;
 
-  const events = [];
-  const result = {
-    cycle: cycleNumber,
-    success: false,
-    events: events,
-    recordsFetched: 0,
-    recordsCreated: 0,
-    recordsUpdated: 0,
-    recordsErrored: 0,
-    failureType: null
-  };
+	const events = [];
+	const result = {
+		cycle: cycleNumber,
+		success: false,
+		events,
+		recordsFetched: 0,
+		recordsCreated: 0,
+		recordsUpdated: 0,
+		recordsErrored: 0,
+		failureType: null,
+	};
 
-  // Step 1: Always start with the SQL query initiation
-  events.push({
-    level: 'info',
-    eventId: EVENT_ID.SYNC_START,
-    message: `Sync cycle ${cycleNumber}: Initiating SQL Server query on dbo.Contacts...`
-  });
+	// -----------------------------------------------------------------------
+	// Step 1: Query SQL Server (with retry for deadlocks/timeouts)
+	// -----------------------------------------------------------------------
+	events.push({
+		level: "info",
+		eventId: EVENT_ID.SYNC_START,
+		message: `Sync cycle ${cycleNumber}: Querying SQL Server dbo.Contacts for changes...`,
+	});
 
-  // Small delay to simulate query execution
-  await delay(randomInt(50, 200));
+	let queryResult;
+	try {
+		queryResult = await queryWithRetry(
+			cycleNumber,
+			new Date().toISOString(),
+			sqlFailureRate,
+			events,
+		);
+	} catch (err) {
+		if (err.classified) {
+			result.failureType = err.isRetryExhausted
+				? `${err.classification.category}_RETRY_EXHAUSTED`
+				: err.classification.category;
+			return result;
+		}
+		events.push({
+			level: "error",
+			eventId: EVENT_ID.SQL_ERROR,
+			message: `Unexpected SQL layer error: ${err.message}`,
+		});
+		result.failureType = "UNKNOWN_SQL_ERROR";
+		return result;
+	}
 
-  // Determine if this cycle will fail
-  const willFail = Math.random() < failureRate;
+	result.recordsFetched = queryResult.rowCount;
+	events.push({
+		level: "info",
+		eventId: EVENT_ID.SYNC_START,
+		message:
+			`Sync cycle ${cycleNumber}: Fetched ${queryResult.rowCount} Contact records ` +
+			`(${queryResult.queryDurationMs}ms, schema ${queryResult.schemaVersion})`,
+	});
 
-  if (willFail) {
-    // Pick a random failure scenario
-    const scenario = randomInt(1, 5);
+	// -----------------------------------------------------------------------
+	// Step 2: Upsert to Salesforce (with retry for 429/503)
+	// -----------------------------------------------------------------------
+	events.push({
+		level: "info",
+		eventId: EVENT_ID.SYNC_START,
+		message: `Sync cycle ${cycleNumber}: Upserting ${queryResult.rowCount} records to Salesforce Contact via Bulk API 2.0...`,
+	});
 
-    switch (scenario) {
-      case 1: // SQL Schema Drift - Column Dropped
-        result.failureType = 'SCHEMA_DRIFT_COLUMN_DROPPED';
-        events.push({
-          level: 'error',
-          eventId: EVENT_ID.COLUMN_DROPPED,
-          message:
-            "SCHEMA_DRIFT: Column 'PhoneExtension' was dropped from dbo.Contacts " +
-            '(detected via schema comparison). Last known schema version: v42, current: v43. ' +
-            "ALTER TABLE migration 'contacts_cleanup_2024' removed column. " +
-            "Integration field mapping 'PhoneExtension -> Contact.Phone_Extension__c' is now broken."
-        });
-        break;
+	try {
+		const sfResult = await upsertWithRetry(
+			cycleNumber,
+			queryResult.records,
+			sfBaseUrl,
+			events,
+		);
 
-      case 2: // SQL Schema Drift - Table Renamed
-        result.failureType = 'SCHEMA_DRIFT_TABLE_RENAMED';
-        events.push({
-          level: 'error',
-          eventId: EVENT_ID.TABLE_RENAMED,
-          message:
-            "SQL_ERROR: Invalid object name 'dbo.Contacts'. Table may have been renamed or moved. " +
-            "Investigating sys.objects... Found potential match: 'dbo.Contact_Records' " +
-            '(renamed in migration #1205 on 2024-01-14). Integration config references stale table name.'
-        });
-        break;
+		const created = Math.floor(
+			Math.random() * Math.floor(queryResult.rowCount * 0.3),
+		);
+		const updated = queryResult.rowCount - created;
+		result.recordsCreated = created;
+		result.recordsUpdated = updated;
+		result.success = true;
 
-      case 3: { // Salesforce Field Missing/Removed
-        result.failureType = 'SALESFORCE_FIELD_MISSING';
-        const fetchedCount = randomInt(50, 1000);
-        result.recordsFetched = fetchedCount;
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Fetched ${fetchedCount} Contact records (delta since last sync)`
-        });
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Mapping SQL Contact fields to Salesforce Contact object...`
-        });
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Upserting ${fetchedCount} records to Salesforce Contact via Bulk API 2.0...`
-        });
-        events.push({
-          level: 'error',
-          eventId: EVENT_ID.SF_FIELD_MISSING,
-          message:
-            'SALESFORCE_UPSERT_FAILED: Field Contact.Department_Code__c does not exist. ' +
-            'API Error: INVALID_FIELD at row 0. The custom field may have been deleted from ' +
-            `the Salesforce org. Last successful upsert using this field: 2024-01-15T08:00:00Z. ` +
-            `Affected records in batch: ${fetchedCount}.`
-        });
-        result.recordsErrored = fetchedCount;
-        break;
-      }
+		events.push({
+			level: "info",
+			eventId: EVENT_ID.SYNC_SUCCESS,
+			message:
+				`Sync cycle ${cycleNumber}: Complete. ${created} created, ${updated} updated, 0 errors. ` +
+				`(SF response: ${sfResult.statusCode})`,
+		});
 
-      case 4: { // Salesforce Object Permission Error
-        result.failureType = 'SALESFORCE_PERMISSION_ERROR';
-        const fetchedCount = randomInt(50, 1000);
-        result.recordsFetched = fetchedCount;
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Fetched ${fetchedCount} Contact records (delta since last sync)`
-        });
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Mapping SQL Contact fields to Salesforce Contact object...`
-        });
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Upserting ${fetchedCount} records to Salesforce Contact via Bulk API 2.0...`
-        });
-        events.push({
-          level: 'error',
-          eventId: EVENT_ID.SF_PERMISSION_ERROR,
-          message:
-            "SALESFORCE_CRUD_ERROR: Entity type 'Contact' is not supported for upsert operation " +
-            "by integration user. Check profile 'API_Integration_Profile' CRUD permissions. " +
-            'Error: INSUFFICIENT_ACCESS on Contact (missing: Create, Edit). ' +
-            "OAuth scope: api,bulk. Connected app: 'SQLServerSync'."
-        });
-        result.recordsErrored = fetchedCount;
-        break;
-      }
-
-      case 5: { // Salesforce Validation Rule Failure (Warning - partial success)
-        result.failureType = 'SALESFORCE_VALIDATION_FAILURE';
-        const fetchedCount = randomInt(200, 1000);
-        result.recordsFetched = fetchedCount;
-        const rejectedCount = randomInt(20, Math.min(100, Math.floor(fetchedCount * 0.3)));
-        const successCount = fetchedCount - rejectedCount;
-        const created = randomInt(0, Math.floor(successCount * 0.4));
-        const updated = successCount - created;
-
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Fetched ${fetchedCount} Contact records (delta since last sync)`
-        });
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Mapping SQL Contact fields to Salesforce Contact object...`
-        });
-        events.push({
-          level: 'info',
-          eventId: EVENT_ID.SYNC_START,
-          message: `Sync cycle ${cycleNumber}: Upserting ${fetchedCount} records to Salesforce Contact via Bulk API 2.0...`
-        });
-        events.push({
-          level: 'warning',
-          eventId: EVENT_ID.VALIDATION_WARNING,
-          message:
-            `SALESFORCE_VALIDATION_FAILED: ${rejectedCount} of ${fetchedCount} ` +
-            "records rejected by validation rule 'Contact.Email_Required_For_Active'. " +
-            "Rule: AND(ISPICKVAL(Status__c, 'Active'), ISBLANK(Email)). " +
-            "Source SQL records have NULL email but Status='Active'. " +
-            `Partial success: ${successCount} records upserted.`
-        });
-
-        result.recordsCreated = created;
-        result.recordsUpdated = updated;
-        result.recordsErrored = rejectedCount;
-        // Partial success counts as a failure for tracking
-        result.success = false;
-        return result;
-      }
-
-      default:
-        break;
-    }
-
-    result.success = false;
-    return result;
-  }
-
-  // Normal (successful) flow
-  const recordCount = randomInt(50, 1000);
-  result.recordsFetched = recordCount;
-
-  events.push({
-    level: 'info',
-    eventId: EVENT_ID.SYNC_START,
-    message: `Sync cycle ${cycleNumber}: Fetched ${recordCount} Contact records (delta since last sync)`
-  });
-
-  await delay(randomInt(30, 100));
-
-  events.push({
-    level: 'info',
-    eventId: EVENT_ID.SYNC_START,
-    message: `Sync cycle ${cycleNumber}: Mapping SQL Contact fields to Salesforce Contact object...`
-  });
-
-  await delay(randomInt(30, 100));
-
-  events.push({
-    level: 'info',
-    eventId: EVENT_ID.SYNC_START,
-    message: `Sync cycle ${cycleNumber}: Upserting ${recordCount} records to Salesforce Contact via Bulk API 2.0...`
-  });
-
-  await delay(randomInt(100, 400));
-
-  const created = randomInt(0, Math.floor(recordCount * 0.3));
-  const updated = recordCount - created;
-  result.recordsCreated = created;
-  result.recordsUpdated = updated;
-
-  events.push({
-    level: 'info',
-    eventId: EVENT_ID.SYNC_SUCCESS,
-    message: `Sync cycle ${cycleNumber}: Complete. ${created} created, ${updated} updated, 0 errors.`
-  });
-
-  result.success = true;
-  return result;
+		return result;
+	} catch (err) {
+		if (err.classified) {
+			result.failureType = err.isRetryExhausted
+				? `${err.classification.category}_RETRY_EXHAUSTED`
+				: err.classification.category;
+			result.recordsErrored = queryResult.rowCount;
+			return result;
+		}
+		events.push({
+			level: "error",
+			eventId: EVENT_ID.SF_ERROR,
+			message: `Salesforce connection error: ${err.message} — is the mock API running?`,
+		});
+		result.failureType = "SF_CONNECTION_ERROR";
+		return result;
+	}
 }
 
 module.exports = {
-  runSyncCycle,
-  EVENT_ID
+	runSyncCycle,
+	EVENT_ID,
 };

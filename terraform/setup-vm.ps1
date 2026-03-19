@@ -95,14 +95,19 @@ if (!(Test-Path "$repoDir\.git")) {
 }
 
 # -----------------------------------------------------------------------------
-# 7. Install npm dependencies for poc-node
+# 7. Install npm dependencies for poc-node and poc-mock-api
 # -----------------------------------------------------------------------------
-Write-Host "`n[7/10] Installing npm dependencies for poc-node..." -ForegroundColor Yellow
+Write-Host "`n[7/10] Installing npm dependencies..." -ForegroundColor Yellow
 
 Push-Location "$repoDir\poc-node"
 npm install
 Pop-Location
-Write-Host "  npm dependencies installed." -ForegroundColor Green
+Write-Host "  poc-node dependencies installed." -ForegroundColor Green
+
+Push-Location "$repoDir\poc-mock-api"
+npm install
+Pop-Location
+Write-Host "  poc-mock-api dependencies installed." -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
 # 8. Install node-windows globally
@@ -179,12 +184,17 @@ Write-Host "  - Node.js: $(node --version)" -ForegroundColor White
 Write-Host "  - C:\POC: created" -ForegroundColor White
 Write-Host "  - Repo: $repoDir" -ForegroundColor White
 Write-Host "  - poc-node: npm dependencies installed" -ForegroundColor White
+Write-Host "  - poc-mock-api: npm dependencies installed" -ForegroundColor White
 Write-Host "  - node-windows: installed globally" -ForegroundColor White
 Write-Host "  - SQLSync-PowerShell: registered via .NET" -ForegroundColor White
 Write-Host "  - SQLSync-NodeApp: registered via eventcreate" -ForegroundColor White
 Write-Host "  - PATH: persisted for all user sessions" -ForegroundColor White
 Write-Host ""
 Write-Host "Run the simulators:" -ForegroundColor Cyan
-Write-Host "  cd $repoDir\poc-powershell; .\Start-IntegrationSync.ps1" -ForegroundColor White
-Write-Host "  cd $repoDir\poc-node; npm start" -ForegroundColor White
+Write-Host "  1. Start the mock Salesforce API (in its own terminal):" -ForegroundColor White
+Write-Host "     cd $repoDir\poc-mock-api; npm start" -ForegroundColor White
+Write-Host "  2. Run the Node.js simulator:" -ForegroundColor White
+Write-Host "     cd $repoDir\poc-node; npm start" -ForegroundColor White
+Write-Host "  3. Run the PowerShell simulator:" -ForegroundColor White
+Write-Host "     cd $repoDir\poc-powershell; .\Start-IntegrationSync.ps1" -ForegroundColor White
 Write-Host ""

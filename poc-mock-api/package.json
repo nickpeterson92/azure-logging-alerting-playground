@@ -1,0 +1,12 @@
+{
+  "name": "sqlsync-mock-salesforce-api",
+  "version": "1.0.0",
+  "description": "Mock Salesforce REST API server for testing",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

@@ -58,7 +58,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ps_warning_events" {
   name                = "alert-sqlsync-powershell-warnings"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
-  description         = "Warning events from SQLSync-PowerShell (rate limits, permission degradation)"
+  description         = "Sustained warnings from SQLSync-PowerShell (repeated deadlocks, timeouts, rate limits suggest systemic issues even if individual retries succeed)"
   tags                = var.tags
 
   evaluation_frequency = "PT5M"
@@ -77,7 +77,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ps_warning_events" {
 
     time_aggregation_method = "Count"
     operator                = "GreaterThan"
-    threshold               = 0
+    threshold               = 5
 
     failing_periods {
       minimum_failing_periods_to_trigger_alert = 1
@@ -134,7 +134,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "node_warning_events" 
   name                = "alert-sqlsync-nodeapp-warnings"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
-  description         = "Warning events from SQLSync-NodeApp (validation failures, partial success)"
+  description         = "Sustained warnings from SQLSync-NodeApp (repeated rate limits, deadlocks, timeouts suggest systemic issues even if individual retries succeed)"
   tags                = var.tags
 
   evaluation_frequency = "PT5M"
@@ -153,7 +153,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "node_warning_events" 
 
     time_aggregation_method = "Count"
     operator                = "GreaterThan"
-    threshold               = 0
+    threshold               = 5
 
     failing_periods {
       minimum_failing_periods_to_trigger_alert = 1
