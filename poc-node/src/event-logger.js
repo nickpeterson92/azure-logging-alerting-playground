@@ -1,42 +1,40 @@
-const EventLogger = require('node-windows').EventLogger;
+const { execFile } = require("node:child_process");
 
-const logger = new EventLogger('SQLSync-NodeApp');
+const SOURCE = "SQLSync-NodeApp";
+const LOG = "APPLICATION";
 
-/**
- * Write an informational event to the Windows Event Log.
- * @param {string} message - The log message.
- * @param {number} eventId - The numeric event ID.
- */
+function writeEvent(type, message, eventId) {
+	execFile(
+		"eventcreate",
+		[
+			"/L", LOG,
+			"/T", type,
+			"/SO", SOURCE,
+			"/D", message,
+			"/ID", String(eventId),
+		],
+		(err) => {
+			if (err) {
+				console.error(`eventcreate failed (${type}, ID=${eventId}): ${err.message}`);
+			}
+		},
+	);
+}
+
 function logInfo(message, eventId) {
-  logger.info(message, eventId, () => {
-    // callback intentionally empty; fire-and-forget
-  });
+	writeEvent("INFORMATION", message, eventId);
 }
 
-/**
- * Write a warning event to the Windows Event Log.
- * @param {string} message - The log message.
- * @param {number} eventId - The numeric event ID.
- */
 function logWarning(message, eventId) {
-  logger.warn(message, eventId, () => {
-    // callback intentionally empty; fire-and-forget
-  });
+	writeEvent("WARNING", message, eventId);
 }
 
-/**
- * Write an error event to the Windows Event Log.
- * @param {string} message - The log message.
- * @param {number} eventId - The numeric event ID.
- */
 function logError(message, eventId) {
-  logger.error(message, eventId, () => {
-    // callback intentionally empty; fire-and-forget
-  });
+	writeEvent("ERROR", message, eventId);
 }
 
 module.exports = {
-  logInfo,
-  logWarning,
-  logError
+	logInfo,
+	logWarning,
+	logError,
 };
